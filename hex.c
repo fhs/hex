@@ -169,74 +169,35 @@ acmeevent(Event *e)
 	}
 }
 
+
 void
-bodyproc(void *a)
+bodyproc(void*)
 {
-	Channel *c;
-	int *fd;
-	char buf[64], *line, *s;
-	Biobuf *bin, *bout;
+	Biobuf *bout, *bin;
+	char buf[64];
+	int c;
 	
 	threadsetname("bodyproc");
 	
-	c = a;
-	fd = recvp(c);
-	close(fd[0]);	/* write end */
-
-	bin = emalloc(sizeof(*bin));
-	Binit(bin, fd[1], OREAD);
+	bin = Bopen(binfile, OREAD);
+	if(bin == nil)
+		sysfatal("open %s: %r", binfile);
 	sprint(buf, "/mnt/wsys/%d/body", w->id);
 	bout = Bopen(buf, OWRITE);
 	if(bout == nil)
 		sysfatal("open %s: %r", buf);
 	
-	while((line = Brdline(bin, '\n')) != nil){
-		line[Blinelen(bin)-1] = 0;
-		s = strpbrk(line, " \t");
-		if(s == nil)
-			s = line;
+	while((c = Bgetc(bin)) >= 0){
+		Bprint(bout, "%02x", c);
+		if(Boffset(bin)%16 == 0)
+			Bprint(bout, "\n");
 		else
-			s += strspn(s, " \t");
-		Bprint(bout, "%s\n", s);
+			Bprint(bout, " ");
 	}
+	Bprint(bout, "\n");
 	Bterm(bout);
 	Bterm(bin);
-	free(bin);
-	close(fd[1]);	/* read end */
-	
 	winclean(w);
-}
-
-void
-xdproc(void*)
-{
-	Channel *c;
-	int *fd;
-	
-	threadsetname("xdproc");
-	
-	rfork(RFFDG);
-	fd = emalloc(2*sizeof(*fd));
-	if(pipe(fd) < 0)
-		sysfatal("pipe: %r");
-	
-	c = chancreate(sizeof(fd), 0);
-	procrfork(bodyproc, c, STACK, RFFDG);
-	if(sendp(c, fd) != 1)
-		sysfatal("send failed");
-	chanfree(c);
-	close(0);
-	open("/dev/null", OREAD);
-	dup(fd[0], 1);
-	close(fd[0]);
-	close(fd[1]);
-	
-	/*
-	 * -b is needed as the default -l might add extra 
-	 * trailing zeros if filesize%4 != 0
-	 */
-	procexecl(nil, "/bin/xd", "xd", "-b", binfile, nil);
-	sysfatal("exec /bin/xd: %r");
 }
 
 void
@@ -256,7 +217,7 @@ hexwinname(void)
 	if(fd < 0 || fd2path(fd, path, sizeof(path)))
 		sysfatal("can't get rooted path: %r");
 	close(fd);
-	w->name = smprint("/hex%s", path);
+	w->name = estrstrdup("/hex", path);
 	winname(w, w->name);
 }
 
@@ -264,6 +225,7 @@ void
 threadmain(int argc, char **argv)
 {
 	Event *e;
+	char *dump, *home;
 	
 	ARGBEGIN{
 	}ARGEND;
@@ -278,7 +240,13 @@ threadmain(int argc, char **argv)
 	fprint(w->ctl, "menu\n");
 	wintagwrite(w, "|fmt -l47 ", 10);
 	
-	proccreate(xdproc, nil, STACK);
+	dump = estrstrdup("Hex ", binfile);
+	home = getenv("home");
+	winsetdump(w, home, dump);
+	free(dump);
+	free(home);
+	
+	proccreate(bodyproc, nil, STACK);
 	proccreate(wineventproc, w, STACK);
 	
 	while(!dead && (e = recvp(w->cevent)))

@@ -1,4 +1,4 @@
-<$PLAN9/src/mkhdr
+</$objtype/mkfile
 
 TARG=Hex
 
@@ -8,6 +8,6 @@ OFILES=\
 	util.$O\
 
 HFILES=hex.h
-BIN=$home/bin/$objtype
+BIN=/$objtype/bin
 
-<$PLAN9/src/mkone
+</sys/src/cmd/mkone
